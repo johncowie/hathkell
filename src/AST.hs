@@ -6,17 +6,48 @@ import Data.Maybe (maybe)
 import Control.Monad (sequence, (>>=))
 import Control.Applicative ((<*>), (<$>))
 import Debug.Trace (trace)
-import Text.Read (readMaybe)
+import Read(  Symbol(Function, Literal, SymbolName, List)
+            , EvalError
+            , ParseError
+            , Scope
+            , readAST
+            )
 
-data Symbol = Function String (Scope -> [Symbol] -> Either EvalError Symbol)
-            | Literal Integer
-            | SymbolName String
-            | List [Symbol]
-
-type ParseError = String
-type EvalError = String
 type EvalResult = String
-type Scope = Map.Map String Symbol
+
+symbolToInteger :: Symbol -> Either EvalError Integer
+symbolToInteger (Literal i) = Right i
+symbolToInteger (Function _ _) = Left "can't convert function to integer"
+symbolToInteger _ = Left "can't convert non literal type to integer"
+
+readInteger :: Scope -> Symbol -> Either EvalError Integer
+readInteger scope a = (evalAST scope a) >>= symbolToInteger
+
+readIntegers :: Scope -> [Symbol] -> Either EvalError [Integer]
+readIntegers scope = sequence . map (readInteger scope)
+
+bindArgToScope :: Scope -> String -> Symbol -> Scope
+bindArgToScope scope sym v = Map.insert sym v scope
+
+bindArgsToScope :: Scope -> [Symbol] -> [Symbol] -> Either EvalError Scope
+bindArgsToScope scope [] [] = Right scope
+bindArgsToScope scope ((SymbolName s):ans) (ag:ags) =
+  bindArgsToScope (bindArgToScope scope s ag) ans ags
+bindArgsToScope scope (an:ans) (ag:ags) = Left "Args must be symbols"
+bindArgsToScope _ _ _ = Left "Not the right number of args"
+
+func :: [Symbol] -> [Symbol] -> Scope -> [Symbol] -> Either EvalError Symbol
+func argNames body scope args = do
+  evaluatedArgs <- sequence (map (evalAST scope) args)
+  newScope <- bindArgsToScope scope argNames evaluatedArgs
+  result <- sequence (map (evalAST newScope) body)
+  return (last result)
+
+createFunction :: Scope -> [Symbol] -> Either EvalError Symbol
+createFunction scope [] = Left "function must have arg list"
+createFunction scope ((List argList):body) = Right $ Function "anonymousFunction" (func argList body)
+createFunction scope [x] = Left "function must have a body"
+createFunction scope _ = Left "first argument to function must be arg list"
 
 plus :: Scope -> [Symbol] -> Either EvalError Symbol
 plus scope a = do
@@ -37,49 +68,6 @@ mult scope as = do
   xs <- readIntegers scope as
   return $ Literal $ foldl (*) 1 xs
 
-instance Show Symbol where
-  show (Function s f) = s
-  show (Literal i) = show i
-  show (SymbolName s) = s
-  show (List s) = show s
-
-symbolToInteger :: Symbol -> Either EvalError Integer
-symbolToInteger (Literal i) = Right i
-symbolToInteger (Function _ _) = Left "can't convert function to integer"
-
-readInteger :: Scope -> Symbol -> Either EvalError Integer
-readInteger scope a = (evalAST scope a) >>= symbolToInteger
-
-readIntegers :: Scope -> [Symbol] -> Either EvalError [Integer]
-readIntegers scope = sequence . map (readInteger scope)
-
--- anonFunction :: Scope -> [Symbol] -> Either EvalError Symbol
--- anonFunction scope [] = Left "anonymous function must have arg list"
--- anonFunction scope (argList:args) =
-
--- fun is called with an arglist
-
-bindArgToScope :: Scope -> String -> Symbol -> Scope
-bindArgToScope scope sym v = Map.insert sym v scope
-
-bindArgsToScope :: Scope -> [Symbol] -> [Symbol] -> Either EvalError Scope
-bindArgsToScope scope [] [] = Right scope
-bindArgsToScope scope ((SymbolName s):ans) (ag:ags) =
-  bindArgsToScope (bindArgToScope scope s ag) ans ags
-bindArgsToScope scope (an:ans) (ag:ags) = Left "Args must be symbols"
-bindArgsToScope _ _ _ = Left "Not the right number of args"
-
-func :: [Symbol] -> [Symbol] -> Scope -> [Symbol] -> Either EvalError Symbol
-func argNames body scope args = do
-  newScope <- bindArgsToScope scope argNames args
-  result <- sequence (map (evalAST newScope) body)
-  return (last result)
-
-
-createFunction :: Scope -> [Symbol] -> Either EvalError Symbol
-createFunction scope [] = Left "anonymous function must have arg list"
-createFunction scope ((List argList):body) = Right $ Function "anonymousFunction" (func argList body)
-
 globalScope :: Map.Map String Symbol
 globalScope = Map.fromList [  ("+", Function "+" plus)
                             , ("-", Function "-" minus)
@@ -89,61 +77,6 @@ globalScope = Map.fromList [  ("+", Function "+" plus)
 
 lookupSymbol :: Map.Map String Symbol -> String -> Either EvalError Symbol
 lookupSymbol m s = maybe (Left "Couldn't resolve symbol ") Right (Map.lookup s m)
-
-whitespace :: Char -> Bool
-whitespace ' ' = True
-whitespace '\n' = True
-whitespace '\t' = True
-whitespace _ = False
-
-replace :: Char -> String -> String -> String
-replace _ _ [] = []
-replace o replacement (c:cs)
-  | o == c = replacement ++ (replace o replacement cs)
-  | otherwise = c:(replace o replacement cs)
-
-splitOn :: (Char -> Bool) -> String -> [String]
-splitOn _ [] = []
-splitOn p xs =
-  case firstWord of
-    "" -> []
-    _  -> firstWord:splitOn p rest
-  where (_,trimmed) = break (not . p) xs
-        (firstWord,rest) = break p trimmed
-
-
-tokens = (splitOn whitespace) .
-         (replace ')' " ) ") .
-         (replace '(' " ( ")
-
-dropLast :: [a] -> [a]
-dropLast [] = []
-dropLast [x] = []
-dropLast (x:xs) = x:dropLast xs
-
-addToLevel :: Symbol -> Int -> Symbol -> Symbol
-addToLevel (List asts) 0 ast = List (asts ++ [ast])
-addToLevel (List asts) n ast = List $ (dropLast asts) ++ [addToLevel (last asts) (n - 1) ast]
-
--- TODO, rewrite this from right to left, so can append to front above
--- also modify to use error instead of maybe
-p :: Either ParseError (Symbol, Int) -> String -> Either ParseError (Symbol, Int)
-p (Left "EOF") "(" = Right (List [], 0)
-p (Right (ast, n)) "(" = Right ((addToLevel ast n (List [])), (n+1))
-p (Right (ast, n)) ")"  = Right (ast, (n-1))
-p (Right (ast, n)) x = do
-  token <- evalTokenAST x
-  return ((addToLevel ast n token), n)
-p pair x = error $ (show x) ++ " " ++ (show pair)
-
-pt :: [String] -> Either ParseError (Symbol, Int)
-pt = foldl p (Left "EOF")
-
-readAST :: String -> Either ParseError Symbol
-readAST s = case (pt . tokens) s of  -- FIXME this case statement is broken
-  Right (ast, -1) -> Right ast
-  Right (ast, n) -> Left "Mismatched parentheses"
-  Left err -> Left err
 
 resolveSymbolName :: Scope -> Symbol -> Either EvalError Symbol
 resolveSymbolName scope (SymbolName s) = lookupSymbol scope s
@@ -156,30 +89,9 @@ execFunction :: Scope -> Symbol -> [Symbol] -> Either EvalError Symbol
 execFunction scope (Function _ f) args = f scope args
 execFunction scope (Literal _) _ = Left "Can't call a literal as a function"
 execFunction scope (SymbolName s) _ = Left "Can't call unresolved symbol name as a function"
-
-readEither :: (Read a) => String -> String -> Either EvalError a
-readEither typeName s = maybe (Left errorMessage) Right (readMaybe s)
-  where errorMessage = "can't parse " ++ s ++ " to type " ++ typeName
-
-evalIntLiteral :: String -> Either EvalError Symbol
-evalIntLiteral = (fmap Literal) . (readEither "Integer")
-
-evalSymbolName :: String -> Either EvalError Symbol
-evalSymbolName = Right . SymbolName
-
-applyFunctions :: [(a -> b)] -> a -> [b]
-applyFunctions [] v = []
-applyFunctions (f:fs) v = f v:applyFunctions fs v
-
-firstRight :: a -> [Either a b] -> Either a b
-firstRight defaultLeft [] = Left defaultLeft
-firstRight defaultLeft ((Right x):xs) = Right x
-firstRight defaultLeft (_:xs) = firstRight defaultLeft xs
+execFunction scope (List s) _ = Left "Can't call list as function"
 
 
-evalTokenAST ::  String -> Either EvalError Symbol
-evalTokenAST s = firstRight ("Can't parse token " ++ s) .
-                 applyFunctions [evalIntLiteral, evalSymbolName] $ s
 
 evalAST :: Map.Map String Symbol -> Symbol -> Either EvalError Symbol
 evalAST localScope (List []) = Left "empty expression"
@@ -192,16 +104,5 @@ eval :: String -> Either EvalError Symbol
 eval s = (readAST s) >>= (evalAST globalScope)
 
 -- TODO
--- as well as global references, funtions need their own symbol scope - should that be part of the type?
---    how will arguments be loaded into function?  When function is applied, the arguments need to be bound to the scope of the function
---    e.g. (fun [a])
-   -- 1) produces a function that takes one argument
-  --  2) when the function is called, the argument is evaluated
-    -- 3) the argument is then attached to the symbolName of the firstArgument in the function's scope map
-      -- 4) when evaluating the ASTs that comprise the body of the function, this scope is passed to all of the evalASTs
-
-  -- i)  make evalAST take a local scope
-  -- ii) give function an optional argument list of symbols
-  -- iii)
-  -- iv) make a list function for producing a list
-  -- v) need list Symbol type
+-- split file into reader,  evaluator and core
+-- split things up by passing in 'evaluator' to library functions
