@@ -1,0 +1,32 @@
+convert s-expression into tree
+
+(+ 1 1)
+
+= Expression (Symbol +) (Value 1) (Value 1)
+
+(+ 1 (+ 1 2))
+
+= Expression + []
+
+
+----------- parsing
+
+(+ 1 (+ 2 2))
+
+(
+      => (
++
+      => (+
+1
+      => (+1
+(
+      => 
++
+
+2
+
+2
+
+)
+
+)
