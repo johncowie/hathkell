@@ -5,63 +5,66 @@ import qualified Data.Map as Map
 import Data.Maybe (maybe)
 import Control.Monad (sequence, (>>=))
 import Control.Applicative ((<*>), (<$>))
-import Text.Regex (mkRegex, matchRegex)
-import Text.Regex.Posix (getAllTextMatches, (=~))
 import Debug.Trace (trace)
 import Text.Read (readMaybe)
 
-data AST = Expression [AST] | Value String deriving Show
-data Symbol = Function String ([AST] -> Either EvalError Symbol) | Literal Integer | SymbolName String
+data Symbol = Function String (Scope -> [Symbol] -> Either EvalError Symbol)
+            | Literal Integer
+            | SymbolName String
+            | List [Symbol]
+
 type ParseError = String
 type EvalError = String
 type EvalResult = String
+type Scope = Map.Map String Symbol
 
-plus :: [AST] -> Either EvalError Symbol
-plus a = do
-  integers <- readIntegers a
+plus :: Scope -> [Symbol] -> Either EvalError Symbol
+plus scope a = do
+  integers <- readIntegers scope a
   return $ Literal  . (foldr (+) 0) $ integers
 
-minus :: [AST] -> Either EvalError Symbol
-minus [] = Left "- takes at least two args"
-minus [a] = Left "- takes at least two args"
-minus as = do
-  (x:y:ys) <- readIntegers as
+minus :: Scope -> [Symbol] -> Either EvalError Symbol
+minus scope [] = Left "- takes at least two args"
+minus scope [a] = Left "- takes at least two args"
+minus scope as = do
+  (x:y:ys) <- readIntegers scope as
   return $ Literal $ foldl (-) (x - y) ys
 
-mult :: [AST] -> Either EvalError Symbol
-mult [] = Left "* takes at least two args"
-mult [a] = Left "* takes at least two args"
-mult as = do
-  xs <- readIntegers as
+mult :: Scope -> [Symbol] -> Either EvalError Symbol
+mult scope [] = Left "* takes at least two args"
+mult scope [a] = Left "* takes at least two args"
+mult scope as = do
+  xs <- readIntegers scope as
   return $ Literal $ foldl (*) 1 xs
 
 instance Show Symbol where
   show (Function s f) = s
   show (Literal i) = show i
   show (SymbolName s) = s
+  show (List s) = show s
 
 symbolToInteger :: Symbol -> Either EvalError Integer
 symbolToInteger (Literal i) = Right i
 symbolToInteger (Function _ _) = Left "can't convert function to integer"
 symbolToInteger (SymbolName _) = Left "can't convert symbol to integer"
 
-readInteger :: AST -> Either EvalError Integer
-readInteger a = (evalAST a) >>= symbolToInteger
+readInteger :: Scope -> Symbol -> Either EvalError Integer
+readInteger scope a = (evalAST scope a) >>= symbolToInteger
 
-readIntegers :: [AST] -> Either EvalError [Integer]
-readIntegers = sequence . map readInteger
+readIntegers :: Scope -> [Symbol] -> Either EvalError [Integer]
+readIntegers scope = sequence . map (readInteger scope)
 
-anonFunction :: [AST] -> Either EvalError Symbol
-anonFunction = fmap last . sequence . map evalAST
+anonFunction :: Scope -> [Symbol] -> Either EvalError Symbol
+anonFunction scope = fmap last . sequence . map (evalAST scope)
 
-storeFunction :: [AST] -> Either EvalError Symbol
-storeFunction args = Right (Function "an anonymous function" anonFunction)
+storeFunction :: Scope -> [Symbol] -> Either EvalError Symbol
+storeFunction scope args = Right (Function "an anonymous function" anonFunction)
 
-symbols :: Map.Map String Symbol
-symbols = Map.fromList [  ("+", Function "+" plus)
-                        , ("-", Function "-" minus)
-                        , ("*", Function "*" mult)
-                        , ("fun", Function "fun" storeFunction)
+globalScope :: Map.Map String Symbol
+globalScope = Map.fromList [  ("+", Function "+" plus)
+                            , ("-", Function "-" minus)
+                            , ("*", Function "*" mult)
+                            , ("fun", Function "fun" storeFunction)
                         ]
 
 lookupSymbol :: Map.Map String Symbol -> String -> Either EvalError Symbol
@@ -98,39 +101,41 @@ dropLast [] = []
 dropLast [x] = []
 dropLast (x:xs) = x:dropLast xs
 
-addToLevel :: AST -> Int -> AST -> AST
-addToLevel (Expression asts) 0 ast = Expression (asts ++ [ast])
-addToLevel (Expression asts) n ast = Expression $ (dropLast asts) ++ [addToLevel (last asts) (n - 1) ast]
+addToLevel :: Symbol -> Int -> Symbol -> Symbol
+addToLevel (List asts) 0 ast = List (asts ++ [ast])
+addToLevel (List asts) n ast = List $ (dropLast asts) ++ [addToLevel (last asts) (n - 1) ast]
 
 -- TODO, rewrite this from right to left, so can append to front above
 -- also modify to use error instead of maybe
-p :: (Maybe AST, Int) -> String -> (Maybe AST, Int)
-p (Nothing, n) "(" = (Just (Expression []), (n+1))
-p ((Just ast), n) "(" = (Just (addToLevel ast n (Expression [])), (n+1))
-p ((Just ast), n) ")"  = (Just ast, (n-1))
-p ((Just ast), n) x = (Just (addToLevel ast n (Value x)), n)
+p :: Either ParseError (Symbol, Int) -> String -> Either ParseError (Symbol, Int)
+p (Left "EOF") "(" = Right (List [], 0)
+p (Right (ast, n)) "(" = Right ((addToLevel ast n (List [])), (n+1))
+p (Right (ast, n)) ")"  = Right (ast, (n-1))
+p (Right (ast, n)) x = do
+  token <- evalTokenAST x
+  return ((addToLevel ast n token), n)
 p pair x = error $ (show x) ++ " " ++ (show pair)
 
-pt :: [String] -> (Maybe AST, Int)
-pt = foldl p (Nothing, -1)
+pt :: [String] -> Either ParseError (Symbol, Int)
+pt = foldl p (Left "EOF")
 
-readAST :: String -> Either ParseError AST
-readAST s = case (pt . tokens) s of
-  (Just ast, -1) -> Right ast
-  (Just ast, n) -> Left "Mismatched parentheses"
-  otherwise -> Left "Reached EOF with nothing to parse"
+readAST :: String -> Either ParseError Symbol
+readAST s = case (pt . tokens) s of  -- FIXME this case statement is broken
+  Right (ast, -1) -> Right ast
+  Right (ast, n) -> Left "Mismatched parentheses"
+  Left err -> Left err
 
 resolveSymbolName :: Symbol -> Either EvalError Symbol
-resolveSymbolName (SymbolName s) = lookupSymbol symbols s
+resolveSymbolName (SymbolName s) = lookupSymbol globalScope s
 resolveSymbolName symbol = Right symbol
 
-evalFunction :: AST -> Either EvalError Symbol
-evalFunction a = (evalAST a) >>= resolveSymbolName
+resolveFunction :: Scope -> Symbol -> Either EvalError Symbol
+resolveFunction scope a = (evalAST scope a) >>= resolveSymbolName
 
-execFunction :: Symbol -> [AST] -> Either EvalError Symbol
-execFunction (Function _ f) args = f args
-execFunction (Literal _) _ = Left "Can't call a literal as a function"
-execFunction (SymbolName s) _ = Left "Can't call unresolved symbol name as a function"
+execFunction :: Scope -> Symbol -> [Symbol] -> Either EvalError Symbol
+execFunction scope (Function _ f) args = f scope args
+execFunction scope (Literal _) _ = Left "Can't call a literal as a function"
+execFunction scope (SymbolName s) _ = Left "Can't call unresolved symbol name as a function"
 
 readEither :: (Read a) => String -> String -> Either EvalError a
 readEither typeName s = maybe (Left errorMessage) Right (readMaybe s)
@@ -156,12 +161,27 @@ evalTokenAST ::  String -> Either EvalError Symbol
 evalTokenAST s = firstRight ("Can't parse token " ++ s) .
                  applyFunctions [evalIntLiteral, evalSymbolName] $ s
 
-evalAST :: AST -> Either EvalError Symbol
-evalAST (Expression []) = Left "empty expression"
-evalAST (Expression (n:ns)) = do
-  f <- evalFunction n
-  execFunction f ns
-evalAST (Value s) = evalTokenAST s
+evalAST :: Map.Map String Symbol -> Symbol -> Either EvalError Symbol
+evalAST localScope (List []) = Left "empty expression"
+evalAST localScope (List (n:ns)) = do
+  f <- resolveFunction localScope n
+  execFunction localScope f ns
+evalAST localScope v = Right v
 
 eval :: String -> Either EvalError Symbol
-eval s = (readAST s) >>= evalAST
+eval s = (readAST s) >>= (evalAST globalScope)
+
+-- TODO
+-- as well as global references, funtions need their own symbol scope - should that be part of the type?
+--    how will arguments be loaded into function?  When function is applied, the arguments need to be bound to the scope of the function
+--    e.g. (fun [a])
+   -- 1) produces a function that takes one argument
+  --  2) when the function is called, the argument is evaluated
+    -- 3) the argument is then attached to the symbolName of the firstArgument in the function's scope map
+      -- 4) when evaluating the ASTs that comprise the body of the function, this scope is passed to all of the evalASTs
+
+  -- i)  make evalAST take a local scope
+  -- ii) give function an optional argument list of symbols
+  -- iii)
+  -- iv) make a list function for producing a list
+  -- v) need list Symbol type
