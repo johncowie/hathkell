@@ -6,25 +6,25 @@ import Data.Maybe (maybe)
 import Control.Monad (sequence, (>>=))
 import Control.Applicative ((<*>), (<$>))
 import Debug.Trace (trace)
-import Read(  Symbol(Function, Literal, SymbolName, List)
+import Read(  Symbol(Function, IntLiteral, SymbolName, List)
             , EvalError
             , ParseError
             , Scope
             , readAST
+            , typeName
+            , intLiteral
+            , asInteger
+            , asFunction
+            , asBool
             )
 
 type EvalResult = String
 
-symbolToInteger :: Symbol -> Either EvalError Integer
-symbolToInteger (Literal i) = Right i
-symbolToInteger (Function _ _) = Left "can't convert function to integer"
-symbolToInteger _ = Left "can't convert non literal type to integer"
-
-readInteger :: Scope -> Symbol -> Either EvalError Integer
-readInteger scope a = (evalAST scope a) >>= symbolToInteger
+evalToInteger :: Scope -> Symbol -> Either EvalError Integer
+evalToInteger scope a = (evalAST scope a) >>= asInteger
 
 readIntegers :: Scope -> [Symbol] -> Either EvalError [Integer]
-readIntegers scope = sequence . map (readInteger scope)
+readIntegers scope = sequence . map (evalToInteger scope)
 
 bindArgToScope :: Scope -> String -> Symbol -> Scope
 bindArgToScope scope sym v = Map.insert sym v scope
@@ -52,27 +52,37 @@ createFunction scope _ = Left "first argument to function must be arg list"
 plus :: Scope -> [Symbol] -> Either EvalError Symbol
 plus scope a = do
   integers <- readIntegers scope a
-  return $ Literal  . (foldr (+) 0) $ integers
+  return $ intLiteral  . (foldr (+) 0) $ integers
 
 minus :: Scope -> [Symbol] -> Either EvalError Symbol
 minus scope [] = Left "- takes at least two args"
 minus scope [a] = Left "- takes at least two args"
 minus scope as = do
   (x:y:ys) <- readIntegers scope as
-  return $ Literal $ foldl (-) (x - y) ys
+  return $ intLiteral $ foldl (-) (x - y) ys
 
 mult :: Scope -> [Symbol] -> Either EvalError Symbol
 mult scope [] = Left "* takes at least two args"
 mult scope [a] = Left "* takes at least two args"
 mult scope as = do
   xs <- readIntegers scope as
-  return $ Literal $ foldl (*) 1 xs
+  return $ intLiteral $ foldl (*) 1 xs
+
+ifFunc :: Scope -> [Symbol] -> Either EvalError Symbol
+ifFunc scope [condition, success, failure] = do
+  bAST <- evalAST scope condition
+  b <- asBool bAST
+  if b
+    then evalAST scope success
+    else evalAST scope failure
+ifFunc scope _ = Left "Wrong number of args to if"
 
 globalScope :: Map.Map String Symbol
 globalScope = Map.fromList [  ("+", Function "+" plus)
                             , ("-", Function "-" minus)
                             , ("*", Function "*" mult)
                             , ("fun", Function "fun" createFunction)
+                            , ("if", Function "if" ifFunc)
                         ]
 
 lookupSymbol :: Map.Map String Symbol -> String -> Either EvalError Symbol
@@ -86,14 +96,11 @@ resolveFunction :: Scope -> Symbol -> Either EvalError Symbol
 resolveFunction scope a = (evalAST scope a) >>= (resolveSymbolName scope)
 
 execFunction :: Scope -> Symbol -> [Symbol] -> Either EvalError Symbol
-execFunction scope (Function _ f) args = f scope args
-execFunction scope (Literal _) _ = Left "Can't call a literal as a function"
-execFunction scope (SymbolName s) _ = Left "Can't call unresolved symbol name as a function"
-execFunction scope (List s) _ = Left "Can't call list as function"
+execFunction scope s args = do
+  f <- asFunction s
+  f scope args
 
-
-
-evalAST :: Map.Map String Symbol -> Symbol -> Either EvalError Symbol
+evalAST :: Scope -> Symbol -> Either EvalError Symbol
 evalAST localScope (List []) = Left "empty expression"
 evalAST localScope (List (n:ns)) = do
   f <- resolveFunction localScope n
@@ -106,3 +113,7 @@ eval s = (readAST s) >>= (evalAST globalScope)
 -- TODO
 -- split file into reader,  evaluator and core
 -- split things up by passing in 'evaluator' to library functions
+-- rename literal to int literal X
+-- make boolean literal X
+-- make 'if' X
+-- figure out how to modify global bindings

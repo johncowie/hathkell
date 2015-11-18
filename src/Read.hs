@@ -3,7 +3,13 @@ module Read
 , ParseError(..)
 , EvalError(..)
 , Scope(..)
-, readAST)
+, readAST
+, typeName
+, intLiteral
+, asInteger
+, asFunction
+, asBool
+)
 where
 
 import qualified Data.Map as Map
@@ -13,7 +19,8 @@ import Text.Read (readMaybe)
 type ParseError = String
 type EvalError = String
 data Symbol = Function String (Scope -> [Symbol] -> Either EvalError Symbol)
-            | Literal Integer
+            | IntLiteral Integer
+            | BooleanLiteral Bool
             | SymbolName String
             | List [Symbol]
 
@@ -21,9 +28,39 @@ type Scope = Map.Map String Symbol
 
 instance Show Symbol where
   show (Function s f) = s
-  show (Literal i) = show i
+  show (IntLiteral i) = show i
   show (SymbolName s) = s
   show (List s) = show s
+  show (BooleanLiteral s) = show s
+
+intLiteral :: Integer -> Symbol
+intLiteral = IntLiteral
+
+boolLiteral :: Bool -> Symbol
+boolLiteral = BooleanLiteral
+
+typeName :: Symbol -> String
+typeName (Function _ _) = "Function"
+typeName (IntLiteral _) = "Integer"
+typeName (SymbolName _) = "Symbol"
+typeName (List _) = "List"
+typeName (BooleanLiteral _) = "Bool"
+-- typeName s = "Unknown"
+
+asInteger :: Symbol -> Either EvalError Integer
+asInteger (IntLiteral i) = Right i
+asInteger s = Left ("Can't cast " ++ (typeName s) ++ " to Integer")
+
+asFunction :: Symbol -> Either EvalError (Scope -> [Symbol] -> Either EvalError Symbol)
+asFunction (Function n f) = Right f
+asFunction s = Left ("Can't cast " ++ (typeName s) ++ " to Function")
+
+asBool :: Symbol -> Either EvalError Bool
+asBool (BooleanLiteral b) = Right b
+asBool s = Left ("Can't cast " ++ (typeName s) ++ " to Bool")
+
+
+--- reader stuff
 
 dropLast :: [a] -> [a]
 dropLast [] = []
@@ -75,17 +112,24 @@ pt = foldl p (Left "EOF")
 
 evalTokenAST ::  String -> Either ParseError Symbol
 evalTokenAST s = firstRight ("Can't parse token " ++ s) .
-                 applyFunctions [evalIntLiteral, evalSymbolName] $ s
+                 applyFunctions [readIntLiteral,
+                                 readBoolLiteral,
+                                 readSymbolName] $ s
 
 readEither :: (Read a) => String -> String -> Either EvalError a
 readEither typeName s = maybe (Left errorMessage) Right (readMaybe s)
  where errorMessage = "can't parse " ++ s ++ " to type " ++ typeName
 
-evalIntLiteral :: String -> Either ParseError Symbol
-evalIntLiteral = (fmap Literal) . (readEither "Integer")
+readIntLiteral :: String -> Either ParseError Symbol
+readIntLiteral = (fmap IntLiteral) . (readEither "Integer")
 
-evalSymbolName :: String -> Either ParseError Symbol
-evalSymbolName = Right . SymbolName
+readBoolLiteral :: String -> Either ParseError Symbol
+readBoolLiteral "true" = Right (boolLiteral True)
+readBoolLiteral "false" = Right (boolLiteral False)
+readBoolLiteral s = Left ("can't parse " ++ s ++ " to type Bool")
+
+readSymbolName :: String -> Either ParseError Symbol
+readSymbolName = Right . SymbolName
 
 readAST :: String -> Either ParseError Symbol
 readAST s = case (pt . tokens) s of
