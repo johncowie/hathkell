@@ -1,0 +1,12 @@
+(def not
+  (fun (b)
+    (= b false)))
+
+(def >
+  (fun (a b)
+    (not (and (< a b) (= a b)))))
+
+(def defmacro
+  (fun (name args body)
+    (read
+      (quote (def name (fun args body))))))

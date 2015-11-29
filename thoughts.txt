@@ -1,32 +1,8 @@
-convert s-expression into tree
+ROADMAP:
 
-(+ 1 1)
-
-= Expression (Symbol +) (Value 1) (Value 1)
-
-(+ 1 (+ 1 2))
-
-= Expression + []
-
-
------------ parsing
-
-(+ 1 (+ 2 2))
-
-(
-      => (
-+
-      => (+
-1
-      => (+1
-(
-      => (+1(
-+
-      => (+1(+
-2
-      => (+1(+2
-2
-      => (+1(+22
-)
-      => 
-)
+X introduce haskeline to repl
+X sort out tests
+- do string parsing
+- deal with escape characters properly in parsing
+- do file io
+- make defmacro work
