@@ -2,7 +2,7 @@ ROADMAP:
 
 X introduce haskeline to repl
 X sort out tests
-- do string parsing
+X do string parsing
 - deal with escape characters properly in parsing
 - do file io
 - make defmacro work

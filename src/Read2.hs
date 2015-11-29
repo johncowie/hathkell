@@ -5,7 +5,6 @@ where
 import qualified Data.Map as Map
 import qualified Data.List as List
 import qualified Data.Char as Char
-import Util (firstRight, applyFunctions)
 import Text.Read (readMaybe)
 import qualified Text.ParserCombinators.Parsec as P
 import qualified Text.Parsec.Token as T
@@ -16,79 +15,7 @@ import Core ( Symbol
             , intLiteral
             , boolLiteral
             , stringLiteral
-            , symbolName
-            )
-
-type ParseError = String
-
---- reader stuff
-
-whitespace :: Char -> Bool
-whitespace ' ' = True
-whitespace '\n' = True
-whitespace '\t' = True
-whitespace _ = False
-
-replace :: Char -> String -> String -> String
-replace _ _ [] = []
-replace o replacement (c:cs)
-  | o == c = replacement ++ (replace o replacement cs)
-  | otherwise = c:(replace o replacement cs)
-
-splitOn :: (Char -> Bool) -> String -> [String]
-splitOn _ [] = []
-splitOn p xs =
-  case firstWord of
-    "" -> []
-    _  -> firstWord:splitOn p rest
-  where (_,trimmed) = break (not . p) xs
-        (firstWord,rest) = break p trimmed
-
-tokens = (splitOn whitespace) .
-         (replace ')' " ) ") .
-         (replace '(' " ( ")
-
-readNext :: [Symbol] -> [String] -> Either ParseError ([Symbol], [String])
-readNext csyms [] = Right (csyms, [])
-readNext csyms ("(":xs) = do
-  result <- (readNext [] xs)
-  let (syms, strings) = result
-  readNext (csyms ++ [listExpression syms]) strings
-readNext syms (")":xs) = Right (syms, xs)
-readNext csyms (token:xs) = do
-  symbol <- readValue token
-  readNext (csyms ++ [symbol]) xs
-
--- TODO check for empty
--- TODO check parentheses balance
-
-readASTOld :: String -> Either ParseError [Symbol]
-readASTOld = (fmap fst) . (readNext []) . tokens
-
-readValue ::  String -> Either ParseError Symbol
-readValue s = firstRight ("Can't parse token " ++ s) .
-                 applyFunctions [readIntLiteral,
-                                 readBoolLiteral,
-                                 readSymbolName] $ s
-
-readEither :: (Read a) => String -> String -> Either ParseError a
-readEither typeName s = maybe (Left errorMessage) Right (readMaybe s)
- where errorMessage = "can't parse " ++ s ++ " to type " ++ typeName
-
-readIntLiteral :: String -> Either ParseError Symbol
-readIntLiteral = (fmap intLiteral) . (readEither "Integer")
-
-readBoolLiteral :: String -> Either ParseError Symbol
-readBoolLiteral "true" = Right (boolLiteral True)
-readBoolLiteral "false" = Right (boolLiteral False)
-readBoolLiteral s = Left ("can't parse " ++ s ++ " to type Bool")
-
-readSymbolName :: String -> Either ParseError Symbol
-readSymbolName = Right . symbolName
-
-
---- parsec
-
+            , symbolName)
 
 readAST :: String -> Either P.ParseError [Symbol]
 readAST = P.parse parseSymbols "error"
@@ -98,11 +25,12 @@ parseSymbols = (P.many parseSymbol) <* P.eof
 
 parseSymbol :: P.CharParser () Symbol
 parseSymbol = value <* P.spaces
-  where value = parseBool
-                P.<|> parseList
-                P.<|> parseString
-                P.<|> parseInt
-                P.<|> parseSymbolName
+  where value = P.choice [ parseBool
+                         , parseList
+                         , parseString
+                         , parseInt
+                         , parseSymbolName]
+                         P.<?> "Doh"
 
 parseSeries :: Char -> P.CharParser () a -> Char -> P.CharParser () [a]
 parseSeries left parser right =
@@ -125,8 +53,8 @@ parseSymbolName = symbolName <$> (P.many1 symbolChar)
         isSymbolChar c = (not (Char.isSpace c)) && (notElem c "\"()")
 
 parseBool :: P.CharParser () Symbol
-parseBool = boolLiteral <$> (        True  <$ (P.string "true")
-                               P.<|> False <$ (P.string "false"))
+parseBool = P.try (boolLiteral <$> (        True  <$ (P.string "true")
+                               P.<|> False <$ (P.string "false")))
 
 -- parseString :: P.CharParser () Symbol
 -- parseString = stringLiteral <$> (P.between (P.char '"') (P.char '"') (P.many jchar))

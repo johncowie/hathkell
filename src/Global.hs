@@ -6,6 +6,8 @@ import qualified Eval2 as E
 import qualified Data.Map as Map
 import qualified Data.List as List
 import qualified Scope as S
+import qualified Control.Monad.Trans.Either as TE
+import Control.Monad.IO.Class (liftIO)
 import Control.Monad ((>>=))
 import Util (showTrace)
 import Core (
@@ -121,6 +123,20 @@ readExp args = evalError $ "read should take just one string argument" ++ show a
 quote :: Fn
 quote = return . stringLiteral . concat . (List.intersperse " ") . map show -- need to return string literal here
 
+suck :: Fn
+suck [s] = do
+  fileName <- asString s
+  content <- (liftIO $ readFile fileName)
+  return (stringLiteral content)
+suck args = evalError $ "suck should just take one argument"
+
+blow :: Fn
+blow [s, str] = do
+  fileName <- asString s
+  content <- asString str
+  liftIO $ writeFile fileName content
+  return s
+
 globalScope :: Bindings
 globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("-", function "-" minus)
@@ -133,4 +149,6 @@ globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("<", function "<" lt)
                             , ("read", function "read" readExp)
                             , ("quote", function "quote" quote)
+                            , ("suck", function "suck" suck)
+                            , ("blow", function "blow" blow)
                         ]

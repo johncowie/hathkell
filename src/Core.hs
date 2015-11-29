@@ -152,6 +152,7 @@ typeName (Literal (IntLiteral _)) = "Integer"
 typeName (Literal (SymbolRef _)) = "Symbol"
 typeName (List _) = "List"
 typeName (Literal (BooleanLiteral _)) = "Bool"
+typeName (Literal (StringLiteral _)) = "String"
 -- typeName s = "Unknown"
 
 castError requiredType s = evalError ("Can't cast " ++ (typeName s) ++ " " ++ (show s) ++ " to " ++ requiredType)

@@ -31,5 +31,5 @@ evalAST v = resolveSymbolName v
 
 eval :: String -> C.Scope C.Symbol
 eval s = case (readAST s) of
-  (Left err) -> C.evalError err
+  (Left err) -> C.evalError (show err)
   (Right syms) -> (fmap last) (mapM evalAST syms)
