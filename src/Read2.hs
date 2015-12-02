@@ -9,13 +9,15 @@ import Text.Read (readMaybe)
 import qualified Text.ParserCombinators.Parsec as P
 import qualified Text.Parsec.Token as T
 import qualified Numeric as N
-
+import Util (showTrace)
 import Core ( Symbol
             , listExpression
             , intLiteral
             , boolLiteral
             , stringLiteral
-            , symbolName)
+            , noneLiteral
+            , symbolName
+            , typeName)
 
 readAST :: String -> Either P.ParseError [Symbol]
 readAST = P.parse parseSymbols "error"
@@ -25,7 +27,8 @@ parseSymbols = (P.many parseSymbol) <* P.eof
 
 parseSymbol :: P.CharParser () Symbol
 parseSymbol = value <* P.spaces
-  where value = P.choice [ parseBool
+  where value = P.choice [ parseNone
+                         , parseBool
                          , parseList
                          , parseString
                          , parseInt
@@ -45,16 +48,21 @@ parseString = stringLiteral <$> (P.between (P.char '\"') (P.char '\"') (P.many s
   where schar = P.satisfy (`notElem` "\"")
 
 parseInt :: P.CharParser () Symbol
-parseInt = (intLiteral . read) <$> (P.many1 (P.oneOf "0123456789"))
+parseInt = (intLiteral . read) <$> (P.many1 (P.oneOf "-+0123456789"))
 
 parseSymbolName :: P.CharParser () Symbol
 parseSymbolName = symbolName <$> (P.many1 symbolChar)
   where symbolChar = P.satisfy isSymbolChar
-        isSymbolChar c = (not (Char.isSpace c)) && (notElem c "\"()")
 
 parseBool :: P.CharParser () Symbol
-parseBool = P.try (boolLiteral <$> (        True  <$ (P.string "true")
-                               P.<|> False <$ (P.string "false")))
+parseBool = P.try (boolLiteral <$> (        True  <$ (P.string "true") <* P.notFollowedBy (P.satisfy isSymbolChar)
+                                      P.<|> False <$ (P.string "false") <* P.notFollowedBy (P.satisfy isSymbolChar)))
+
+isSymbolChar c = (not (Char.isSpace c)) && (notElem c "\"()")
+notSymbolChar = not . isSymbolChar
+
+parseNone :: P.CharParser () Symbol
+parseNone = P.try $ noneLiteral <$ (P.string "none" >> P.notFollowedBy (P.satisfy isSymbolChar))
 
 -- parseString :: P.CharParser () Symbol
 -- parseString = stringLiteral <$> (P.between (P.char '"') (P.char '"') (P.many jchar))

@@ -16,4 +16,5 @@ firstRight defaultLeft [] = Left defaultLeft
 firstRight defaultLeft ((Right x):xs) = Right x
 firstRight defaultLeft (_:xs) = firstRight defaultLeft xs
 
+showTrace :: (Show v) => String -> v -> v
 showTrace s v = trace ("<" ++ s ++ " | " ++ (show v) ++ ">") v

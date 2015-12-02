@@ -6,6 +6,7 @@ module Scope
 , runStateEither
 , evalStateEither
 , execStateEither
+, get
 ) where
 
 import qualified Control.Monad.State.Lazy as S
@@ -34,3 +35,9 @@ getEither :: (e -> Either String a) -> StateEither e a
 getEither f = S.StateT $ \e -> case (f e) of
                                  (Right v) -> E.hoistEither (Right (v, e))
                                  (Left err) -> E.hoistEither (Left err)
+
+-- getT :: (StateEither e e)
+-- getT = S.getT
+
+get :: (StateEither e e)
+get = S.get

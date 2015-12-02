@@ -10,3 +10,34 @@
   (fun (name args body)
     (read
       (quote (def name (fun args body))))))
+
+(def cons
+  (fun (x y)
+      (fun (m)
+        (if (= m 0)
+          x
+          (if (= m 1)
+            y
+            (error "index supplied to cons must be 0 or 1"))))))
+
+(def head
+  (fun (l)
+    (l 0)))
+
+(def tail
+  (fun (l)
+    (l 1)))
+
+(def none?
+  (fun (v)
+    (= v none)))
+
+(def l (cons 1 (cons 2 (cons 3 (cons 4 none)))))
+
+(def at-index
+  (fun (l i)
+    (if (none? l)
+     (error "array index out of bounds")
+      (if (= i 0)
+        (l 0)
+        (at-index (l 1) (- i 1))))))

@@ -27,8 +27,11 @@ import Core (
             , asBool
             , asSymbolName
             , addBinding
+            , addLocalBinding
             , asString
             , wrapScope
+            , mostLocalScope
+            , anonFunction
             )
 
 evalToInteger :: Symbol -> Scope Integer
@@ -43,12 +46,12 @@ localBindings argNames args
   | length argNames > length args = evalError "Not enough args supplied"
   | otherwise = evalResult . Map.fromList . (zip argNames) $ args
 
-func :: [String] -> [Symbol] -> [Symbol] -> Scope Symbol
+func :: [String] -> [Symbol] -> Fn
 func argNames body args = do
   evaluatedArgs <- (mapM E.evalAST args)
   localScope <- localBindings argNames evaluatedArgs
-  (result:results) <- wrapScope localScope (mapM E.evalAST body) -- FIXME return last evaluated result for now -- introduce NIL later
-  return result
+  results <- wrapScope localScope (mapM E.evalAST body) -- FIXME return last evaluated result for now -- introduce NIL later
+  return (last results)
 
 evalArgNames :: [Symbol] -> Scope [String]
 evalArgNames = mapM asSymbolName
@@ -57,7 +60,8 @@ createFunction :: Fn
 createFunction [] = evalError "function must have arg list"
 createFunction ((List argList):body) = do
   argNames <- evalArgNames argList
-  return (function "anonymousFunction" (func argNames body))
+  originalScope <- S.get
+  return (anonFunction "anonymousFunction" (mostLocalScope originalScope) (func argNames body))
 createFunction [x] = evalError "function must have a body"
 createFunction _ = evalError "first argument to function must be arg list"
 
@@ -82,13 +86,14 @@ mult as = do
 
 ifFunc :: Fn
 ifFunc [condition, success, failure] = do
-  bAST <- E.evalAST condition -- FIXME what if there are new bindings?
+  bAST <- E.evalAST condition
   b <- asBool bAST
   if b
     then E.evalAST success
     else E.evalAST failure
 ifFunc _ = evalError "Wrong number of args to if"
 
+-- def adds a global binding
 def :: Fn
 def [symbolName, body] = do
   name <- asSymbolName symbolName
@@ -137,6 +142,12 @@ blow [s, str] = do
   liftIO $ writeFile fileName content
   return s
 
+throwError :: Fn
+throwError [s] = do
+  msg <- asString s
+  evalError msg
+throwError args = evalError "throwError takes one argument"
+
 globalScope :: Bindings
 globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("-", function "-" minus)
@@ -151,4 +162,4 @@ globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("quote", function "quote" quote)
                             , ("suck", function "suck" suck)
                             , ("blow", function "blow" blow)
-                        ]
+                            , ("error", function "error" throwError)]
