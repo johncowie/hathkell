@@ -1,5 +1,6 @@
 module Lib
     (
+    core
     ) where
 
 import qualified Core as C

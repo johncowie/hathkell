@@ -148,6 +148,13 @@ throwError [s] = do
   evalError msg
 throwError args = evalError "throwError takes one argument"
 
+printFn :: Fn
+printFn args = do
+  evald <- mapM E.evalAST args
+  let str = concat (map show evald)
+  liftIO $ putStr str
+  return $ stringLiteral str
+
 globalScope :: Bindings
 globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("-", function "-" minus)
@@ -162,4 +169,5 @@ globalScope = Map.fromList [  ("+", function "+" plus)
                             , ("quote", function "quote" quote)
                             , ("suck", function "suck" suck)
                             , ("blow", function "blow" blow)
-                            , ("error", function "error" throwError)]
+                            , ("error", function "error" throwError)
+                            , ("print", function "print" printFn)]
